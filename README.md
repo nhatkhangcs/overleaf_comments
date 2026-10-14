@@ -5,7 +5,7 @@ page, with arrows pointing at the commented phrase, figure, table or
 equation**. Nobody has to open the Overleaf comment panel: compile, and the
 comments are in the PDF.
 
-The page is made wider, so the venue's layout (line numbers, rulers, columns,
+Note that the page is made wider, so the venue's layout (line numbers, rulers, columns,
 page breaks) is left as it is. One option switches everything off for
 submission.
 
@@ -133,3 +133,9 @@ make clean
   show up in running heads, so put it next to the title instead.
 - The AAAI and other camera-ready checkers expect the original page size:
   always submit with `[final]`, or with the package removed.
+
+## Author
+
+**Khang Vo**, MBZUAI ([@nhatkhangcs](https://github.com/nhatkhangcs))
+
+Released under the [MIT License](LICENSE).
