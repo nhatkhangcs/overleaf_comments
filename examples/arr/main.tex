@@ -1,0 +1,102 @@
+% ACL Rolling Review (ARR) -- official acl.sty, review mode (line numbers)
+\documentclass[11pt]{article}
+\usepackage[review]{acl}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+% ---------------------------------------------------------------------------
+% Visual review comments. Use \usepackage[final]{sidecomments} to hide them
+% all and get back the original page size (for submission).
+% ---------------------------------------------------------------------------
+\usepackage{sidecomments}
+\screviewer{KV}{Khang}{blue}          % -> \KV, \KVnote, \KVbox
+\screviewer{AB}{Reviewer 2}{red!80!black}  % -> \AB, \ABnote, \ABbox
+
+\title{Calibrating LLM Judges for Long-Form Evaluation}
+\author{Anonymous ARR submission}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Large language models are increasingly used as \KV{automatic evaluators}{Say \emph{LLM-as-a-judge} here; it is the term reviewers will search for.}
+for open-ended generation. We study how reliable such evaluators are when the
+candidate outputs are long, and we propose \textsc{SideJudge}, a simple
+calibration method that \AB{reduces position bias by 43\%}{43\% relative or absolute? Please clarify and give the baseline number.}
+on three benchmarks while adding negligible cost.
+\end{abstract}
+
+\section{Introduction}
+Evaluating free-form text is hard. Human annotation is slow and expensive,
+so recent work replaces it with a strong model that scores or ranks
+candidate answers~\citep{zheng2023judging}. These judges, however, are
+known to prefer the first answer they see, to favour longer responses, and
+to reward their own style. \AB{In this paper we show that all three biases
+grow with the length of the candidates, and that a single calibration step
+removes most of them}{This sentence is the main claim. Make sure Section~3 actually tests \emph{all three} biases; currently only position bias is measured.}.
+
+Our contributions are threefold. First, we build a length-controlled
+benchmark.\KVnote{Add a footnote with the dataset license.} Second, we
+propose \textsc{SideJudge}. Third, we release code and data.
+Prior work on calibration~\citep{wang2023fair} swaps the order of the two
+candidates and averages the verdicts; we instead estimate the bias directly,
+which needs \KV[right]{only one extra forward pass}{Is this true for the
+pairwise setting too? Please state the cost for both settings.}.
+
+\section{Method}
+Let $p_\theta(y \mid a, b)$ be the probability that the judge prefers answer
+$a$ over answer $b$. We define the calibrated preference as
+\begin{equation}
+  \KVbox{$\displaystyle \tilde p(a \succ b) = \sigma\!\left(\operatorname{logit} p_\theta(a\succ b) - \hat\beta_{\mathrm{pos}} - \hat\beta_{\mathrm{len}}\,\Delta\ell\right)$}{Define $\Delta\ell$ (characters or tokens?) and say how $\hat\beta$ is fitted.}
+\end{equation}
+where $\sigma$ is the logistic function. The bias terms are estimated on a
+small held-out set of \AB{1{,}000 pairs}{Is 1k pairs enough? Report variance across 5 random held-out sets.}
+whose gold label is known to be a tie.
+
+\begin{figure}[t]
+  \centering
+  \ABbox{\includegraphics[width=0.85\linewidth]{example-image-a}}{The axis labels are unreadable when printed. Use at least 8pt fonts and a colour-blind safe palette.}
+  \caption{Position bias as a function of candidate length.}
+  \label{fig:bias}
+\end{figure}
+
+\section{Experiments}
+Table~\ref{tab:main} reports agreement with human preferences.
+\textsc{SideJudge} improves over the uncalibrated judge on every benchmark,
+\KV{with the largest gains on the longest inputs}{Nice; this matches Fig.~\ref{fig:bias}. Point to it explicitly.}.
+
+\begin{table}[t]
+  \centering
+  \KVbox{\begin{tabular}{lccc}
+    \toprule
+    Method & MT-Bench & Arena & LongEval \\
+    \midrule
+    Judge only      & 66.0 & 61.2 & 54.8 \\
+    Swap \& average & 68.4 & 63.0 & 57.1 \\
+    \textsc{SideJudge} & \textbf{70.3} & \textbf{65.9} & \textbf{63.2} \\
+    \bottomrule
+  \end{tabular}}{Add standard deviations over 3 seeds, and a row for the human-human agreement upper bound.}
+  \caption{Agreement (\%) with human preferences.}
+  \label{tab:main}
+\end{table}
+
+We further ablate the two bias terms. Removing the length term hurts most on
+LongEval, while removing the position term hurts uniformly. \sccomment[reviewer=AB]{These
+ablations are not in any table}{Please add an ablation table (could go to the appendix).}
+Finally, calibration transfers across judges: parameters fitted on one model
+reduce the bias of another by a similar amount.\scnote{Generic comment from \texttt{\textbackslash scnote}: consider moving this to the discussion.}
+
+\section{Conclusion}
+We showed that LLM judges become less reliable as candidates get longer and
+that a lightweight calibration fixes most of the problem.
+\KV{We hope this work encourages the community to report calibrated scores}{Too vague; end with a concrete recommendation instead.}.
+
+\bibliography{refs}
+\end{document}

@@ -1,0 +1,16 @@
+# LaTeX build artefacts
+*.aux
+*.log
+*.bbl
+*.blg
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+examples/*/main.pdf
+dist/
+.DS_Store
+*.brf

@@ -1,0 +1,626 @@
+%% sidecomments.sty -- visual review comments in widened side margins, with arrows.
+%%
+%% Works with any class/template (ACL/ARR, ICLR, CVPR, AAAI, NeurIPS, ...).
+%% The page is made wider (extra margin on the left and/or right), the original
+%% layout is NOT changed. Comment boxes are stacked in the new margins and an
+%% arrow points to the commented phrase / figure / table / position.
+%%
+%% Compile twice (latexmk and Overleaf do this automatically).
+%%
+%%   \usepackage{sidecomments}            % comments visible (default)
+%%   \usepackage[final]{sidecomments}     % hide everything, original page size
+%%
+%%   \screviewer{KV}{Khang}{blue}         % defines \KV, \KVnote, \KVbox
+%%   \KV{some phrase}{The comment.}       % highlight phrase + comment
+%%   \KV[right]{some phrase}{...}         % force side (left | right | auto)
+%%   \KVnote{Missing citation here.}      % point comment at current position
+%%   \KVbox{\includegraphics{fig}}{...}   % frame a figure/table/equation box
+%%
+%% Released under the MIT license.
+
+\NeedsTeXFormat{LaTeX2e}[2022/06/01]
+\ProvidesExplPackage{sidecomments}{2026/10/14}{1.0}
+  {Visual side-margin review comments with arrows}
+
+% ---------------------------------------------------------------------------
+% Options
+% ---------------------------------------------------------------------------
+\bool_new:N \g__sc_final_bool
+\dim_new:N  \g__sc_width_dim
+\dim_new:N  \g__sc_pad_dim
+\dim_new:N  \g__sc_gap_dim
+\str_new:N  \g__sc_sides_str
+\tl_new:N   \g__sc_font_tl
+
+\keys_define:nn { sidecomments }
+  {
+    final .bool_gset:N  = \g__sc_final_bool ,
+    final .default:n    = true ,
+    draft .code:n       = \bool_gset_false:N \g__sc_final_bool ,
+    draft .value_forbidden:n = true ,
+    hide  .bool_gset:N  = \g__sc_final_bool ,
+    hide  .default:n    = true ,
+    % width of each extra margin added to the page
+    width .dim_gset:N   = \g__sc_width_dim ,
+    width .initial:n    = 5.5cm ,
+    % horizontal padding between a box and the edge of the extra margin
+    pad   .dim_gset:N   = \g__sc_pad_dim ,
+    pad   .initial:n    = 0.3cm ,
+    % vertical gap between stacked boxes
+    gap   .dim_gset:N   = \g__sc_gap_dim ,
+    gap   .initial:n    = 4pt ,
+    sides .choices:nn   = { both , left , right }
+      { \str_gset:Ne \g__sc_sides_str { \l_keys_choice_tl } } ,
+    sides .initial:n    = both ,
+    font  .tl_gset:N    = \g__sc_font_tl ,
+    font  .initial:n    = \footnotesize \sffamily ,
+  }
+\ProcessKeyOptions [ sidecomments ]
+
+\NewDocumentCommand \scsetup { m } { \keys_set:nn { sidecomments } {#1} }
+
+\msg_new:nnn { sidecomments } { unknown-reviewer }
+  { Unknown~reviewer~'#1'.~Define~it~with~\token_to_str:N \screviewer. }
+\msg_new:nnn { sidecomments } { redefine }
+  { Reviewer~command~\iow_char:N\\#1~already~exists~and~is~being~redefined. }
+\msg_new:nnn { sidecomments } { overflow }
+  { Too~many~comments~on~the~#1~side~of~page~#2;~boxes~may~overlap. }
+
+% ---------------------------------------------------------------------------
+% Reviewers and user commands
+% ---------------------------------------------------------------------------
+\int_new:N \g__sc_id_int
+\tl_new:N  \l__sc_id_tl
+\tl_new:N  \l__sc_rev_tl
+\tl_new:N  \l__sc_side_tl
+\tl_new:N  \l__sc_color_tl
+\tl_new:N  \l__sc_name_tl
+\box_new:N \l__sc_target_box
+
+\cs_new_protected:Npn \__sc_reviewer_data:nnn #1#2#3
+  {
+    \tl_gclear_new:c { g__sc_name_  #1 _tl }
+    \tl_gclear_new:c { g__sc_color_ #1 _tl }
+    \tl_gset:cn { g__sc_name_  #1 _tl } {#2}
+    \tl_gset:cn { g__sc_color_ #1 _tl } {#3}
+  }
+\__sc_reviewer_data:nnn { default } { Comment } { orange }
+
+% \screviewer{<key>}{<display name>}{<xcolor color>}
+\NewDocumentCommand \screviewer { m m m }
+  {
+    \__sc_reviewer_data:nnn {#1} {#2} {#3}
+    \cs_if_exist:cT {#1} { \msg_warning:nnn { sidecomments } { redefine } {#1} }
+    \exp_args:Nc \DeclareDocumentCommand {#1} { O{} m +m }
+      { \__sc_comment:nnnnn {#1} { phrase } {##1} {##2} {##3} }
+    \exp_args:Nc \DeclareDocumentCommand { #1note } { O{} +m }
+      { \__sc_comment:nnnnn {#1} { note } {##1} { } {##2} }
+    \exp_args:Nc \DeclareDocumentCommand { #1box } { O{} +m +m }
+      { \__sc_comment:nnnnn {#1} { box } {##1} {##2} {##3} }
+  }
+
+% Generic commands (reviewer chosen with the key reviewer=<key>)
+\NewDocumentCommand \sccomment { O{} m +m }
+  { \__sc_comment:nnnnn { default } { phrase } {#1} {#2} {#3} }
+\NewDocumentCommand \scnote { O{} +m }
+  { \__sc_comment:nnnnn { default } { note } {#1} { } {#2} }
+\NewDocumentCommand \scbox { O{} +m +m }
+  { \__sc_comment:nnnnn { default } { box } {#1} {#2} {#3} }
+
+\keys_define:nn { sidecomments / comment }
+  {
+    reviewer .tl_set:N = \l__sc_rev_tl ,
+    side     .choices:nn = { left , right , auto }
+      { \tl_set_eq:NN \l__sc_side_tl \l_keys_choice_tl } ,
+    left     .code:n = \tl_set:Nn \l__sc_side_tl { left } ,
+    left     .value_forbidden:n = true ,
+    l        .code:n = \tl_set:Nn \l__sc_side_tl { left } ,
+    l        .value_forbidden:n = true ,
+    right    .code:n = \tl_set:Nn \l__sc_side_tl { right } ,
+    right    .value_forbidden:n = true ,
+    r        .code:n = \tl_set:Nn \l__sc_side_tl { right } ,
+    r        .value_forbidden:n = true ,
+    color    .tl_set:N = \l__sc_color_tl ,
+    name     .tl_set:N = \l__sc_name_tl ,
+  }
+
+\cs_generate_variant:Nn \prop_gput:Nnn { cnV , cne }
+
+% Comments are inactive inside \tableofcontents, \listoffigures, ... so that a
+% comment in a \caption or \section title is not drawn a second time there.
+\bool_new:N \g__sc_intoc_bool
+\AddToHook { cmd / @starttoc / before } { \bool_gset_true:N  \g__sc_intoc_bool }
+\AddToHook { cmd / @starttoc / after }  { \bool_gset_false:N \g__sc_intoc_bool }
+
+% #1 reviewer key, #2 kind (phrase|note|box), #3 options, #4 target, #5 text
+\cs_new_protected:Npn \__sc_comment:nnnnn #1#2#3#4#5
+  {
+    \bool_lazy_or:nnTF { \g__sc_final_bool } { \g__sc_intoc_bool }
+      {
+        \str_case:nn {#2}
+          {
+            { phrase } {#4}
+            { box } { \mode_leave_vertical: \hbox:n {#4} }
+          }
+      }
+      { \__sc_comment_draft:nnnnn {#1} {#2} {#3} {#4} {#5} }
+  }
+
+\cs_new_protected:Npn \__sc_comment_draft:nnnnn #1#2#3#4#5
+  {
+    \int_gincr:N \g__sc_id_int
+    \tl_set:Ne \l__sc_id_tl { \int_use:N \g__sc_id_int }
+    \tl_set:Nn \l__sc_rev_tl {#1}
+    \tl_set:Nn \l__sc_side_tl { auto }
+    \tl_clear:N \l__sc_color_tl
+    \tl_clear:N \l__sc_name_tl
+    \keys_set:nn { sidecomments / comment } {#3}
+    \tl_if_exist:cF { g__sc_name_ \l__sc_rev_tl _tl }
+      {
+        \msg_error:nne { sidecomments } { unknown-reviewer } { \l__sc_rev_tl }
+        \tl_set:Nn \l__sc_rev_tl { default }
+      }
+    \tl_if_empty:NT \l__sc_color_tl
+      { \tl_set_eq:Nc \l__sc_color_tl { g__sc_color_ \l__sc_rev_tl _tl } }
+    \tl_if_empty:NT \l__sc_name_tl
+      { \tl_set_eq:Nc \l__sc_name_tl { g__sc_name_ \l__sc_rev_tl _tl } }
+    \prop_gclear_new:c { g__sc_ \l__sc_id_tl _prop }
+    \prop_gput:cnn { g__sc_ \l__sc_id_tl _prop } { kind }  {#2}
+    \prop_gput:cnV { g__sc_ \l__sc_id_tl _prop } { side }  \l__sc_side_tl
+    \prop_gput:cnV { g__sc_ \l__sc_id_tl _prop } { color } \l__sc_color_tl
+    \prop_gput:cnV { g__sc_ \l__sc_id_tl _prop } { name }  \l__sc_name_tl
+    \prop_gput:cnn { g__sc_ \l__sc_id_tl _prop } { text }  {#5}
+    \str_case:nn {#2}
+      {
+        { phrase }
+          {
+            \prop_gput:cne { g__sc_ \l__sc_id_tl _prop } { ht }
+              { \dim_eval:n { \box_ht:N \strutbox } }
+            \prop_gput:cne { g__sc_ \l__sc_id_tl _prop } { dp }
+              { \dim_eval:n { \box_dp:N \strutbox } }
+            % horizontal extent of the current lines (lists, quotes, abstracts)
+            \prop_gput:cne { g__sc_ \l__sc_id_tl _prop } { lm }
+              { \dim_eval:n { \@totalleftmargin + \tex_leftskip:D } }
+            \prop_gput:cne { g__sc_ \l__sc_id_tl _prop } { lw }
+              { \dim_eval:n { \linewidth - \tex_leftskip:D - \tex_rightskip:D } }
+            \mode_leave_vertical:
+            \exp_args:Ne \__sc_phrase:nn { \l__sc_id_tl } {#4}
+          }
+        { note }
+          { \exp_args:Ne \__sc_savepos:n { s- \l__sc_id_tl } }
+        { box }
+          {
+            \hbox_set:Nn \l__sc_target_box {#4}
+            \prop_gput:cne { g__sc_ \l__sc_id_tl _prop } { ht }
+              { \dim_eval:n { \box_ht:N \l__sc_target_box } }
+            \prop_gput:cne { g__sc_ \l__sc_id_tl _prop } { dp }
+              { \dim_eval:n { \box_dp:N \l__sc_target_box } }
+            \mode_leave_vertical:
+            \exp_args:Ne \__sc_boxed:n { \l__sc_id_tl }
+          }
+      }
+  }
+
+\bool_if:NT \g__sc_final_bool { \endinput }
+
+% ===========================================================================
+% Draft mode only below
+% ===========================================================================
+\ExplSyntaxOff
+\RequirePackage{xcolor}
+\RequirePackage{tikz}
+\usetikzlibrary{arrows.meta}
+\RequirePackage{zref-savepos,zref-abspage}
+\ExplSyntaxOn
+\zref@addprop { savepos } { abspage }
+
+\cs_new_protected:Npn \__sc_savepos:n #1 { \zsavepos { sc- #1 } }
+\cs_new_protected:Npn \__sc_phrase:nn #1#2
+  { \__sc_savepos:n { s- #1 } #2 \__sc_savepos:n { e- #1 } }
+\cs_new_protected:Npn \__sc_boxed:n #1
+  {
+    \__sc_savepos:n { s- #1 }
+    \box_use_drop:N \l__sc_target_box
+    \__sc_savepos:n { e- #1 }
+  }
+
+% expandable accessors
+\cs_new:Npn \__sc_ref:nnn #1#2#3 { \zref@extractdefault { sc- #1 } {#2} {#3} }
+\cs_new:Npn \sc@get #1#2 { \prop_item:cn { g__sc_ #1 _prop } {#2} }
+\cs_new:Npn \sc@font { \tl_use:N \g__sc_font_tl }
+
+% ---------------------------------------------------------------------------
+% Widen the page (after every other package has set the page size)
+% ---------------------------------------------------------------------------
+\dim_new:N \sc@boxwd
+\AddToHook { begindocument / end }
+  {
+    \str_if_eq:VnTF \g__sc_sides_str { both }
+      { \dim_gadd:Nn \paperwidth { 2 \g__sc_width_dim } }
+      { \dim_gadd:Nn \paperwidth { \g__sc_width_dim } }
+    \str_if_eq:VnF \g__sc_sides_str { right }
+      { \dim_gadd:Nn \hoffset { \g__sc_width_dim } }
+    \sys_if_engine_luatex:TF
+      { \tex_global:D \tex_pagewidth:D = \paperwidth }
+      { \tex_global:D \pdfpagewidth = \paperwidth }
+    \dim_gset:Nn \sc@boxwd { \g__sc_width_dim - 2 \g__sc_pad_dim }
+  }
+
+% ---------------------------------------------------------------------------
+% Per-page layout, computed just before each page is shipped out
+% ---------------------------------------------------------------------------
+\tl_new:N   \g__sc_bg_tl
+\tl_new:N   \g__sc_fg_tl
+\int_new:N  \l__sc_page_int
+\seq_new:N  \l__sc_left_seq
+\seq_new:N  \l__sc_right_seq
+\prop_new:N \l__sc_data_prop
+\tl_new:N   \l__sc_kind_tl
+\tl_new:N   \l__sc_col_tl
+\str_new:N  \l__sc_s_str
+\bool_new:N \l__sc_endsame_bool
+\dim_new:N  \l__sc_xs_dim
+\dim_new:N  \l__sc_ys_dim
+\dim_new:N  \l__sc_xe_dim
+\dim_new:N  \l__sc_ye_dim
+\dim_new:N  \l__sc_ht_dim
+\dim_new:N  \l__sc_dp_dim
+\dim_new:N  \l__sc_tx_dim
+\dim_new:N  \l__sc_ty_dim
+\dim_new:N  \l__sc_Lx_dim
+\dim_new:N  \l__sc_Rx_dim
+\dim_new:N  \l__sc_colL_dim
+\dim_new:N  \l__sc_colR_dim
+\dim_new:N  \l__sc_top_dim
+\dim_new:N  \l__sc_h_dim
+\dim_new:N  \l__sc_prev_dim
+\dim_new:N  \l__sc_bx_dim
+\dim_new:N  \l__sc_by_dim
+\dim_new:N  \l__sc_ex_dim
+\dim_new:N  \l__sc_dx_dim
+\dim_new:N  \l__sc_x_dim
+
+% page coordinates (from \pdfsavepos, origin bottom-left of the sheet)
+% -> shipout overlay coordinates (origin at (\hoffset, \voffset) from top-left)
+\cs_new:Npn \__sc_x:n #1 { \dim_eval:n { (#1) - \hoffset } }
+\cs_new:Npn \__sc_y:n #1 { \dim_eval:n { (#1) - \paperheight + \voffset } }
+
+\AddToHook { shipout / before } { \__sc_prepare_page: }
+\AddToHook { shipout / background } { \g__sc_bg_tl }
+\AddToHook { shipout / foreground } { \g__sc_fg_tl }
+
+\cs_new_protected:Npn \__sc_prepare_page:
+  {
+    \tl_gclear:N \g__sc_bg_tl
+    \tl_gclear:N \g__sc_fg_tl
+    \int_compare:nNnF { \g__sc_id_int } = { 0 }
+      {
+        \seq_clear:N \l__sc_left_seq
+        \seq_clear:N \l__sc_right_seq
+        \prop_clear:N \l__sc_data_prop
+        \int_set:Nn \l__sc_page_int { \ReadonlyShipoutCounter + 1 }
+        \legacy_if:nTF { @twoside }
+          {
+            \int_if_odd:nTF { \value { page } }
+              { \dim_set:Nn \l__sc_Lx_dim { 1in + \hoffset + \oddsidemargin } }
+              { \dim_set:Nn \l__sc_Lx_dim { 1in + \hoffset + \evensidemargin } }
+          }
+          { \dim_set:Nn \l__sc_Lx_dim { 1in + \hoffset + \oddsidemargin } }
+        \dim_set:Nn \l__sc_Rx_dim { \l__sc_Lx_dim + \textwidth }
+        \int_step_inline:nn { \g__sc_id_int }
+          {
+            \int_compare:nNnT
+              { \__sc_ref:nnn { s- ##1 } { abspage } { -1 } } = { \l__sc_page_int }
+              { \__sc_prepare_item:n {##1} }
+          }
+        \__sc_layout:Nn \l__sc_left_seq  { left }
+        \__sc_layout:Nn \l__sc_right_seq { right }
+      }
+  }
+
+% column boundaries around horizontal position #1
+\cs_new_protected:Npn \__sc_column:n #1
+  {
+    \dim_set_eq:NN \l__sc_colL_dim \l__sc_Lx_dim
+    \dim_set_eq:NN \l__sc_colR_dim \l__sc_Rx_dim
+    \legacy_if:nT { @twocolumn }
+      {
+        \dim_compare:nNnTF {#1} > { \l__sc_Lx_dim + \columnwidth + 0.5 \columnsep }
+          { \dim_set:Nn \l__sc_colL_dim { \l__sc_Rx_dim - \columnwidth } }
+          { \dim_set:Nn \l__sc_colR_dim { \l__sc_Lx_dim + \columnwidth } }
+      }
+  }
+
+% restrict the column to the indented line extent stored for comment #1
+\cs_new_protected:Npn \__sc_indent:n #1
+  {
+    \dim_add:Nn \l__sc_colL_dim { \sc@get {#1} { lm } }
+    \dim_set:Nn \l__sc_colR_dim { \l__sc_colL_dim + \sc@get {#1} { lw } }
+  }
+
+\cs_new_protected:Npn \__sc_hl:nnnn #1#2#3#4
+  {
+    \tl_gput_right:Ne \g__sc_bg_tl
+      {
+        \exp_not:N \sc@hl { \l__sc_col_tl }
+          { \__sc_x:n {#1} } { \__sc_y:n {#2} }
+          { \__sc_x:n {#3} } { \__sc_y:n {#4} }
+      }
+  }
+
+\cs_new_protected:Npn \__sc_prepare_item:n #1
+  {
+    \dim_set:Nn \l__sc_xs_dim { \__sc_ref:nnn { s- #1 } { posx } { 0 } sp }
+    \dim_set:Nn \l__sc_ys_dim { \__sc_ref:nnn { s- #1 } { posy } { 0 } sp }
+    \tl_set:Ne \l__sc_kind_tl { \sc@get {#1} { kind } }
+    \tl_set:Ne \l__sc_col_tl  { \sc@get {#1} { color } }
+    \str_if_eq:VnTF \l__sc_kind_tl { note }
+      {
+        \dim_set_eq:NN \l__sc_xe_dim \l__sc_xs_dim
+        \dim_set_eq:NN \l__sc_ye_dim \l__sc_ys_dim
+        \bool_set_true:N \l__sc_endsame_bool
+      }
+      {
+        \dim_set:Nn \l__sc_xe_dim { \__sc_ref:nnn { e- #1 } { posx } { 0 } sp }
+        \dim_set:Nn \l__sc_ye_dim { \__sc_ref:nnn { e- #1 } { posy } { 0 } sp }
+        \bool_set:Nn \l__sc_endsame_bool
+          {
+            \int_compare_p:nNn
+              { \__sc_ref:nnn { e- #1 } { abspage } { -1 } } = { \l__sc_page_int }
+          }
+        \dim_set:Nn \l__sc_ht_dim { \sc@get {#1} { ht } }
+        \dim_set:Nn \l__sc_dp_dim { \sc@get {#1} { dp } }
+      }
+    % ---- side
+    \str_set:Ne \l__sc_s_str { \sc@get {#1} { side } }
+    \str_if_eq:VnT \l__sc_s_str { auto }
+      {
+        \bool_if:NTF \l__sc_endsame_bool
+          { \dim_set:Nn \l__sc_x_dim { ( \l__sc_xs_dim + \l__sc_xe_dim ) / 2 } }
+          { \dim_set_eq:NN \l__sc_x_dim \l__sc_xs_dim }
+        \str_if_eq:VnT \l__sc_kind_tl { phrase }
+          { \dim_set_eq:NN \l__sc_x_dim \l__sc_xs_dim }
+        \dim_compare:nNnTF { \l__sc_x_dim }
+            < { ( \l__sc_Lx_dim + \l__sc_Rx_dim ) / 2 }
+          { \str_set:Nn \l__sc_s_str { left } }
+          { \str_set:Nn \l__sc_s_str { right } }
+      }
+    \str_if_eq:VnF \g__sc_sides_str { both }
+      { \str_set_eq:NN \l__sc_s_str \g__sc_sides_str }
+    % ---- target point and target decoration
+    \str_case:Vn \l__sc_kind_tl
+      {
+        { phrase }
+          {
+            \__sc_column:n { \l__sc_xs_dim }
+            \__sc_indent:n {#1}
+            \bool_if:nTF
+              {
+                \l__sc_endsame_bool
+                && \dim_compare_p:nNn
+                     { \dim_abs:n { \l__sc_ys_dim - \l__sc_ye_dim } } < { 1pt }
+              }
+              {
+                \__sc_hl:nnnn { \l__sc_xs_dim } { \l__sc_ys_dim - \l__sc_dp_dim }
+                              { \l__sc_xe_dim } { \l__sc_ys_dim + \l__sc_ht_dim }
+              }
+              {
+                \__sc_hl:nnnn { \l__sc_xs_dim } { \l__sc_ys_dim - \l__sc_dp_dim }
+                              { \l__sc_colR_dim } { \l__sc_ys_dim + \l__sc_ht_dim }
+                \bool_if:NT \l__sc_endsame_bool
+                  {
+                    \dim_compare:nNnT
+                      { \l__sc_ye_dim + \l__sc_ht_dim } < { \l__sc_ys_dim - \l__sc_dp_dim }
+                      {
+                        \__sc_hl:nnnn
+                          { \l__sc_colL_dim } { \l__sc_ye_dim + \l__sc_ht_dim }
+                          { \l__sc_colR_dim } { \l__sc_ys_dim - \l__sc_dp_dim }
+                      }
+                    \__sc_column:n { \l__sc_xe_dim }
+                    \__sc_indent:n {#1}
+                    \__sc_hl:nnnn { \l__sc_colL_dim } { \l__sc_ye_dim - \l__sc_dp_dim }
+                                  { \l__sc_xe_dim } { \l__sc_ye_dim + \l__sc_ht_dim }
+                  }
+              }
+            \str_if_eq:VnTF \l__sc_s_str { left }
+              {
+                \dim_set:Nn \l__sc_tx_dim { \l__sc_xs_dim - 0.5pt }
+                \dim_set:Nn \l__sc_ty_dim { \l__sc_ys_dim - 1.5pt }
+              }
+              {
+                \bool_if:NTF \l__sc_endsame_bool
+                  {
+                    \dim_set:Nn \l__sc_tx_dim { \l__sc_xe_dim + 0.5pt }
+                    \dim_set:Nn \l__sc_ty_dim { \l__sc_ye_dim - 1.5pt }
+                  }
+                  {
+                    \dim_set_eq:NN \l__sc_tx_dim \l__sc_xs_dim
+                    \dim_set:Nn \l__sc_ty_dim { \l__sc_ys_dim - 1.5pt }
+                  }
+              }
+          }
+        { note }
+          {
+            \tl_gput_right:Ne \g__sc_fg_tl
+              {
+                \exp_not:N \sc@mark { \l__sc_col_tl }
+                  { \__sc_x:n { \l__sc_xs_dim } } { \__sc_y:n { \l__sc_ys_dim } }
+              }
+            \dim_set:Nn \l__sc_ty_dim { \l__sc_ys_dim - 2.6pt }
+            \str_if_eq:VnTF \l__sc_s_str { left }
+              { \dim_set:Nn \l__sc_tx_dim { \l__sc_xs_dim - 2.2pt } }
+              { \dim_set:Nn \l__sc_tx_dim { \l__sc_xs_dim + 2.2pt } }
+          }
+        { box }
+          {
+            \tl_gput_right:Ne \g__sc_fg_tl
+              {
+                \exp_not:N \sc@frame { \l__sc_col_tl }
+                  { \__sc_x:n { \l__sc_xs_dim } }
+                  { \__sc_y:n { \l__sc_ys_dim - \l__sc_dp_dim } }
+                  { \__sc_x:n { \l__sc_xe_dim } }
+                  { \__sc_y:n { \l__sc_ys_dim + \l__sc_ht_dim } }
+              }
+            \dim_set:Nn \l__sc_ty_dim
+              { \l__sc_ys_dim + ( \l__sc_ht_dim - \l__sc_dp_dim ) / 2 }
+            \str_if_eq:VnTF \l__sc_s_str { left }
+              { \dim_set:Nn \l__sc_tx_dim { \l__sc_xs_dim - 2.5pt } }
+              { \dim_set:Nn \l__sc_tx_dim { \l__sc_xe_dim + 2.5pt } }
+          }
+      }
+    % ---- measure the comment box
+    \sc@makebox {#1}
+    \prop_put:Nne \l__sc_data_prop { #1 / tx } { \dim_use:N \l__sc_tx_dim }
+    \prop_put:Nne \l__sc_data_prop { #1 / ty } { \dim_use:N \l__sc_ty_dim }
+    \prop_put:Nne \l__sc_data_prop { #1 / h }
+      { \dim_eval:n { \box_ht:N \sc@tmpbox + \box_dp:N \sc@tmpbox } }
+    \str_if_eq:VnTF \l__sc_s_str { left }
+      { \seq_put_right:Nn \l__sc_left_seq  {#1} }
+      { \seq_put_right:Nn \l__sc_right_seq {#1} }
+  }
+
+\cs_new:Npn \__sc_get:nn #1#2 { \prop_item:Nn \l__sc_data_prop { #1 / #2 } }
+
+% stack the boxes of one side: no overlap, close to their targets, on the page
+\cs_new_protected:Npn \__sc_layout:Nn #1#2
+  {
+    \seq_if_empty:NF #1
+      {
+        \seq_sort:Nn #1
+          {
+            \dim_compare:nNnTF { \__sc_get:nn {##1} { ty } } < { \__sc_get:nn {##2} { ty } }
+              { \sort_return_swapped: } { \sort_return_same: }
+          }
+        % forward pass (top -> bottom): push boxes down
+        \dim_set:Nn \l__sc_prev_dim { \paperheight - 0.5cm + \g__sc_gap_dim }
+        \seq_map_inline:Nn #1
+          {
+            \dim_set:Nn \l__sc_top_dim
+              {
+                \dim_min:nn { \__sc_get:nn {##1} { ty } + 8pt }
+                            { \l__sc_prev_dim - \g__sc_gap_dim }
+              }
+            \prop_put:Nne \l__sc_data_prop { ##1 / top } { \dim_use:N \l__sc_top_dim }
+            \dim_set:Nn \l__sc_prev_dim { \l__sc_top_dim - \__sc_get:nn {##1} { h } }
+          }
+        % backward pass (bottom -> top): push boxes up to stay on the page
+        \seq_reverse:N #1
+        \dim_set:Nn \l__sc_prev_dim { 0.5cm - \g__sc_gap_dim }
+        \seq_map_inline:Nn #1
+          {
+            \dim_set:Nn \l__sc_top_dim { \__sc_get:nn {##1} { top } }
+            \dim_set:Nn \l__sc_h_dim   { \__sc_get:nn {##1} { h } }
+            \dim_compare:nNnT
+              { \l__sc_top_dim - \l__sc_h_dim } < { \l__sc_prev_dim + \g__sc_gap_dim }
+              {
+                \dim_set:Nn \l__sc_top_dim
+                  { \l__sc_prev_dim + \g__sc_gap_dim + \l__sc_h_dim }
+                \prop_put:Nne \l__sc_data_prop { ##1 / top } { \dim_use:N \l__sc_top_dim }
+              }
+            \dim_set_eq:NN \l__sc_prev_dim \l__sc_top_dim
+          }
+        \dim_compare:nNnT { \l__sc_prev_dim } > { \paperheight }
+          {
+            \msg_warning:nnne { sidecomments } { overflow } {#2}
+              { \int_use:N \l__sc_page_int }
+          }
+        \seq_map_inline:Nn #1 { \__sc_emit:nn {##1} {#2} }
+      }
+  }
+
+\cs_new_protected:Npn \__sc_emit:nn #1#2
+  {
+    \dim_set:Nn \l__sc_top_dim { \__sc_get:nn {#1} { top } }
+    \dim_set:Nn \l__sc_h_dim   { \__sc_get:nn {#1} { h } }
+    \dim_set:Nn \l__sc_tx_dim  { \__sc_get:nn {#1} { tx } }
+    \dim_set:Nn \l__sc_ty_dim  { \__sc_get:nn {#1} { ty } }
+    \dim_set:Nn \l__sc_by_dim
+      { \l__sc_top_dim - \dim_min:nn { 7pt } { \l__sc_h_dim / 2 } }
+    \str_if_eq:nnTF {#2} { left }
+      {
+        \dim_set:Nn \l__sc_x_dim  { \g__sc_pad_dim }
+        \dim_set:Nn \l__sc_bx_dim { \g__sc_pad_dim + \sc@boxwd }
+        \dim_set:Nn \l__sc_ex_dim
+          { \dim_min:nn { \l__sc_Lx_dim } { \l__sc_tx_dim } - 3pt }
+        \dim_set:Nn \l__sc_dx_dim
+          { \dim_min:nn { 1.2cm } { ( \l__sc_ex_dim - \l__sc_bx_dim ) * 4 / 10 } }
+      }
+      {
+        \dim_set:Nn \l__sc_x_dim  { \paperwidth - \g__sc_width_dim + \g__sc_pad_dim }
+        \dim_set_eq:NN \l__sc_bx_dim \l__sc_x_dim
+        \dim_set:Nn \l__sc_ex_dim
+          { \dim_max:nn { \l__sc_Rx_dim } { \l__sc_tx_dim } + 3pt }
+        \dim_set:Nn \l__sc_dx_dim
+          { - \dim_min:nn { 1.2cm } { ( \l__sc_bx_dim - \l__sc_ex_dim ) * 4 / 10 } }
+      }
+    \tl_gput_right:Ne \g__sc_bg_tl
+      {
+        \exp_not:N \sc@arrow { \sc@get {#1} { color } }
+          { \__sc_x:n { \l__sc_bx_dim } } { \__sc_y:n { \l__sc_by_dim } }
+          { \__sc_x:n { \l__sc_ex_dim } } { \__sc_y:n { \l__sc_ty_dim } }
+          { \__sc_x:n { \l__sc_tx_dim } } { \__sc_y:n { \l__sc_ty_dim } }
+          { \dim_use:N \l__sc_dx_dim }
+      }
+    \tl_gput_right:Ne \g__sc_fg_tl
+      {
+        \exp_not:N \sc@putbox {#1}
+          { \__sc_x:n { \l__sc_x_dim } } { \__sc_y:n { \l__sc_top_dim } }
+      }
+  }
+
+\ExplSyntaxOff
+
+% ---------------------------------------------------------------------------
+% Drawing primitives (all coordinates: origin at the page's top-left corner)
+% ---------------------------------------------------------------------------
+\newsavebox\sc@tmpbox
+
+% comment box for comment #1 -> \sc@tmpbox
+\def\sc@makebox#1{%
+  \edef\sc@col{\sc@get{#1}{color}}%
+  \sbox\sc@tmpbox{%
+    \normalfont\normalcolor
+    \begin{tikzpicture}
+      \node[draw=\sc@col, fill=\sc@col!6, line width=.6pt, rounded corners=2.5pt,
+            inner sep=3pt, text width=\dimexpr\sc@boxwd-6.6pt\relax,
+            align=left, font=\sc@font] {%
+        \makebox[\linewidth][l]{\color{\sc@col!75!black}\bfseries
+          \sc@get{#1}{name}\hfill\mdseries\##1}\\[1pt]%
+        \color{black}\sc@get{#1}{text}};
+    \end{tikzpicture}}}
+
+\def\sc@putbox#1#2#3{%
+  \sc@makebox{#1}%
+  \put(0,0){\begin{tikzpicture}[overlay]
+    \node[anchor=north west, inner sep=0pt, outer sep=0pt] at (#2,#3) {\usebox\sc@tmpbox};
+  \end{tikzpicture}}}
+
+% arrow: color, start (box), curve end, target, horizontal control length
+\def\sc@arrow#1#2#3#4#5#6#7#8{%
+  \put(0,0){\begin{tikzpicture}[overlay]
+    \draw[draw=#1, line width=.7pt, line cap=round,
+          -{Stealth[length=5pt, width=4pt]}]
+      (#2,#3) .. controls +(#8,0) and +(-#8,0) .. (#4,#5) -- (#6,#7);
+    \fill[#1] (#2,#3) circle (1.3pt);
+  \end{tikzpicture}}}
+
+% highlight rectangle behind text
+\def\sc@hl#1#2#3#4#5{%
+  \put(0,0){\begin{tikzpicture}[overlay]
+    \fill[#1!22, rounded corners=1pt] (#2,#3) rectangle (#4,#5);
+  \end{tikzpicture}}}
+
+% dashed frame around a figure / table / equation
+\def\sc@frame#1#2#3#4#5{%
+  \put(0,0){\begin{tikzpicture}[overlay]
+    \draw[#1, line width=.7pt, dash pattern=on 3pt off 2pt, rounded corners=2pt]
+      ([shift={(-2pt,-2pt)}]#2,#3) rectangle ([shift={(2pt,2pt)}]#4,#5);
+  \end{tikzpicture}}}
+
+% caret marking an insertion point
+\def\sc@mark#1#2#3{%
+  \put(0,0){\begin{tikzpicture}[overlay]
+    \fill[#1] (#2,#3) ++(0,-0.6pt) -- ++(-2.2pt,-3.6pt) -- ++(4.4pt,0) -- cycle;
+  \end{tikzpicture}}}
+
+\endinput

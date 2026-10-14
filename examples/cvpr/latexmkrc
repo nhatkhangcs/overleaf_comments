@@ -1,0 +1,3 @@
+# find sidecomments.sty in the repository root
+ensure_path("TEXINPUTS", "../../");
+$pdf_mode = 1;
