@@ -139,3 +139,7 @@ make clean
 **Khang Vo**, MBZUAI ([@nhatkhangcs](https://github.com/nhatkhangcs))
 
 Released under the [MIT License](LICENSE).
+
+## Acknowledgement
+
+Inspired by `labreview.sty` from the [SPOT AI Lab](https://github.com/spotai-mbzuai).
