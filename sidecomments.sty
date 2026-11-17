@@ -19,7 +19,7 @@
 %% Released under the MIT license.
 
 \NeedsTeXFormat{LaTeX2e}[2022/06/01]
-\ProvidesExplPackage{sidecomments}{2026/10/14}{1.0}
+\ProvidesExplPackage{sidecomments}{2026/11/17}{1.1}
   {Visual side-margin review comments with arrows}
 
 % ---------------------------------------------------------------------------
@@ -76,6 +76,9 @@
 \tl_new:N  \l__sc_color_tl
 \tl_new:N  \l__sc_name_tl
 \box_new:N \l__sc_target_box
+% id of the innermost \scalebox / \resizebox around the current position
+% (empty outside any); used to undo the scaling when reading positions
+\tl_new:N  \l__sc_ctx_tl
 
 \cs_new_protected:Npn \__sc_reviewer_data:nnn #1#2#3
   {
@@ -170,6 +173,7 @@
     \prop_gput:cnV { g__sc_ \l__sc_id_tl _prop } { color } \l__sc_color_tl
     \prop_gput:cnV { g__sc_ \l__sc_id_tl _prop } { name }  \l__sc_name_tl
     \prop_gput:cnn { g__sc_ \l__sc_id_tl _prop } { text }  {#5}
+    \prop_gput:cnV { g__sc_ \l__sc_id_tl _prop } { ctx }   \l__sc_ctx_tl
     \str_case:nn {#2}
       {
         { phrase }
@@ -215,8 +219,103 @@
 \zref@addprop { savepos } { abspage }
 
 \cs_new_protected:Npn \__sc_savepos:n #1 { \zsavepos { sc- #1 } }
+% A phrase gets a position mark after every top-level space, so that every
+% line it occupies is known: it may run over several lines, into the next
+% column or onto the next page. Phrases holding math or optional arguments are
+% left untouched (a mark there could end up inside them).
+\tl_new:N \l__sc_phrase_tl
 \cs_new_protected:Npn \__sc_phrase:nn #1#2
-  { \__sc_savepos:n { s- #1 } #2 \__sc_savepos:n { e- #1 } }
+  {
+    \int_gzero_new:c { g__sc_nw_ #1 _int }
+    \tl_set:Nn \l__sc_phrase_tl {#2}
+    \tl_if_in:nnF {#2} { $ }
+      {
+        \tl_if_in:nnF {#2} { [ }
+          {
+            \tl_if_in:nnF {#2} { \( }
+              { \tl_replace_all:Nnn \l__sc_phrase_tl { ~ } { ~ \__sc_wmark:n {#1} } }
+          }
+      }
+    \__sc_savepos:n { s- #1 }
+    \tl_use:N \l__sc_phrase_tl
+    \__sc_savepos:n { e- #1 }
+    \prop_gput:cne { g__sc_ #1 _prop } { nw } { \int_use:c { g__sc_nw_ #1 _int } }
+  }
+\cs_new_protected:Npn \__sc_wmark:n #1
+  {
+    \int_gincr:c { g__sc_nw_ #1 _int }
+    \__sc_savepos:n { w- #1 - \int_use:c { g__sc_nw_ #1 _int } }
+  }
+
+% ---------------------------------------------------------------------------
+% Scaled boxes. \pdfsavepos ignores the scaling done by \scalebox and
+% \resizebox (e.g. a table squeezed to \linewidth), so a position recorded
+% inside one is off. Each scaled box records its origin and scale factors;
+% positions recorded inside it are mapped back onto the page.
+% ---------------------------------------------------------------------------
+\int_new:N \g__sc_ctx_int
+\tl_new:N  \g__sc_pending_tl
+\tl_new:N  \l__sc_tmp_tl
+
+\cs_new_protected:Npn \__sc_ctx_new:
+  {
+    \int_gincr:N \g__sc_ctx_int
+    \tl_gclear_new:c { g__sc_ctxp_ \int_use:N \g__sc_ctx_int _tl }
+    \tl_gset_eq:cN { g__sc_ctxp_ \int_use:N \g__sc_ctx_int _tl } \l__sc_ctx_tl
+  }
+\cs_new_protected:Npn \__sc_ctx_enter:n #1 { \tl_set:Nn \l__sc_ctx_tl {#1} }
+
+% \Gscale@box{sx}[sy]{content}: the content is typeset here (\scalebox), or
+% was already typeset by \resizebox, which then left its id in "pending"
+\cs_new_protected:Npn \__sc_scale_box:nnn #1#2#3
+  {
+    \tl_if_empty:NTF \g__sc_pending_tl
+      {
+        \__sc_ctx_new:
+        \exp_args:Ne \__sc_scale_new:nnnn
+          { \int_use:N \g__sc_ctx_int } {#1} {#2} {#3}
+      }
+      {
+        \tl_set_eq:NN \l__sc_tmp_tl \g__sc_pending_tl
+        \tl_gclear:N \g__sc_pending_tl
+        \exp_args:NV \__sc_scale_do:nnnn \l__sc_tmp_tl {#1} {#2} {#3}
+      }
+  }
+\cs_new_protected:Npn \__sc_scale_new:nnnn #1#2#3#4
+  { \__sc_scale_do:nnnn {#1} {#2} {#3} { \__sc_ctx_enter:n {#1} #4 } }
+\cs_new_protected:Npn \__sc_scale_do:nnnn #1#2#3#4
+  {
+    \mode_leave_vertical:
+    \tl_gclear_new:c { g__sc_ctxx_ #1 _tl }
+    \tl_gclear_new:c { g__sc_ctxy_ #1 _tl }
+    \tl_gset:ce { g__sc_ctxx_ #1 _tl } {#2}
+    \tl_gset:ce { g__sc_ctxy_ #1 _tl } {#3}
+    \__sc_savepos:n { g- #1 }
+    \__sc_orig_scale:w {#2} [#3] {#4}
+  }
+% \resizebox: the content is typeset (and measured) before the scaling
+\cs_new_protected:Npn \__sc_resize:Nnn #1#2#3
+  {
+    \__sc_ctx_new:
+    \exp_args:NNe \__sc_resize_aux:Nnn #1 { \int_use:N \g__sc_ctx_int } {#2} {#3}
+  }
+\cs_new_protected:Npn \__sc_resize_aux:Nnn #1#2#3#4
+  { #1 #3 { \__sc_ctx_enter:n {#2} #4 \tl_gset:Nn \g__sc_pending_tl {#2} } }
+
+\AddToHook { begindocument / before }
+  {
+    \cs_if_exist:NT \Gscale@box@dddd
+      {
+        \cs_set_eq:NN \__sc_orig_scale:w \Gscale@box
+        \cs_set_eq:NN \__sc_orig_dd:w    \Gscale@box@dd
+        \cs_set_eq:NN \__sc_orig_dddd:w  \Gscale@box@dddd
+        \cs_set:Npn \Gscale@box #1 [ #2 ] #3 { \__sc_scale_box:nnn {#1} {#2} {#3} }
+        \cs_set:Npn \Gscale@box@dd #1#2#3
+          { \__sc_resize:Nnn \__sc_orig_dd:w { {#1} {#2} } {#3} }
+        \cs_set:Npn \Gscale@box@dddd #1#2#3#4#5
+          { \__sc_resize:Nnn \__sc_orig_dddd:w { {#1} {#2} {#3} {#4} } {#5} }
+      }
+  }
 \cs_new_protected:Npn \__sc_boxed:n #1
   {
     \__sc_savepos:n { s- #1 }
@@ -285,6 +384,53 @@
 \cs_new:Npn \__sc_x:n #1 { \dim_eval:n { (#1) - \hoffset } }
 \cs_new:Npn \__sc_y:n #1 { \dim_eval:n { (#1) - \paperheight + \voffset } }
 
+% position of mark sc-#1 recorded inside scaling context #2
+% -> \l__sc_px_dim, \l__sc_py_dim (true page coordinates), \l__sc_sy_fp
+\dim_new:N \l__sc_px_dim
+\dim_new:N \l__sc_py_dim
+\dim_new:N \l__sc_ox_dim
+\dim_new:N \l__sc_oy_dim
+\fp_new:N  \l__sc_sy_fp
+\cs_new_protected:Npn \__sc_pos:nn #1#2
+  {
+    \dim_set:Nn \l__sc_px_dim { \__sc_ref:nnn {#1} { posx } { 0 } sp }
+    \dim_set:Nn \l__sc_py_dim { \__sc_ref:nnn {#1} { posy } { 0 } sp }
+    \fp_set:Nn \l__sc_sy_fp { 1 }
+    \__sc_unscale:n {#2}
+  }
+\cs_generate_variant:Nn \__sc_pos:nn { ne , nV }
+\cs_new_protected:Npn \__sc_unscale:n #1
+  {
+    \tl_if_blank:nF {#1}
+      {
+        \bool_lazy_all:nT
+          {
+            { \tl_if_exist_p:c { g__sc_ctxx_ #1 _tl } }
+            { \int_compare_p:nNn { \__sc_ref:nnn { g- #1 } { abspage } { -1 } } > { 0 } }
+            { \fp_compare_p:nNn { \tl_use:c { g__sc_ctxx_ #1 _tl } } > { 0 } }
+            { \fp_compare_p:nNn { \tl_use:c { g__sc_ctxy_ #1 _tl } } > { 0 } }
+          }
+          {
+            \dim_set:Nn \l__sc_ox_dim { \__sc_ref:nnn { g- #1 } { posx } { 0 } sp }
+            \dim_set:Nn \l__sc_oy_dim { \__sc_ref:nnn { g- #1 } { posy } { 0 } sp }
+            \dim_set:Nn \l__sc_px_dim
+              {
+                \l__sc_ox_dim + \fp_to_dim:n
+                  { \tl_use:c { g__sc_ctxx_ #1 _tl } * ( \l__sc_px_dim - \l__sc_ox_dim ) }
+              }
+            \dim_set:Nn \l__sc_py_dim
+              {
+                \l__sc_oy_dim + \fp_to_dim:n
+                  { \tl_use:c { g__sc_ctxy_ #1 _tl } * ( \l__sc_py_dim - \l__sc_oy_dim ) }
+              }
+            \fp_set:Nn \l__sc_sy_fp
+              { \l__sc_sy_fp * \tl_use:c { g__sc_ctxy_ #1 _tl } }
+          }
+        \tl_if_exist:cT { g__sc_ctxp_ #1 _tl }
+          { \exp_args:Nv \__sc_unscale:n { g__sc_ctxp_ #1 _tl } }
+      }
+  }
+
 \AddToHook { shipout / before } { \__sc_prepare_page: }
 \AddToHook { shipout / background } { \g__sc_bg_tl }
 \AddToHook { shipout / foreground } { \g__sc_fg_tl }
@@ -309,9 +455,26 @@
         \dim_set:Nn \l__sc_Rx_dim { \l__sc_Lx_dim + \textwidth }
         \int_step_inline:nn { \g__sc_id_int }
           {
-            \int_compare:nNnT
-              { \__sc_ref:nnn { s- ##1 } { abspage } { -1 } } = { \l__sc_page_int }
-              { \__sc_prepare_item:n {##1} }
+            \prop_if_exist:cT { g__sc_ ##1 _prop }
+              {
+                \int_compare:nNnTF
+                  { \__sc_ref:nnn { s- ##1 } { abspage } { -1 } } = { \l__sc_page_int }
+                  { \__sc_prepare_item:n {##1} }
+                  {
+                    % a phrase that started on an earlier page and continues here
+                    \bool_lazy_all:nT
+                      {
+                        { \str_if_eq_p:ee { \sc@get {##1} { kind } } { phrase } }
+                        { \int_compare_p:nNn { \__sc_ref:nnn { s- ##1 } { abspage } { -1 } } > { 0 } }
+                        { \int_compare_p:nNn { \__sc_ref:nnn { s- ##1 } { abspage } { -1 } } < { \l__sc_page_int } }
+                        { \int_compare_p:n { \__sc_ref:nnn { e- ##1 } { abspage } { -1 } >= \l__sc_page_int } }
+                      }
+                      {
+                        \tl_set:Ne \l__sc_col_tl { \sc@get {##1} { color } }
+                        \__sc_hl_phrase:n {##1}
+                      }
+                  }
+              }
           }
         \__sc_layout:Nn \l__sc_left_seq  { left }
         \__sc_layout:Nn \l__sc_right_seq { right }
@@ -348,10 +511,160 @@
       }
   }
 
+% column index (0 left, 1 right) of horizontal position #1
+\cs_new:Npn \__sc_colidx:n #1
+  {
+    \legacy_if:nTF { @twocolumn }
+      {
+        \dim_compare:nNnTF {#1} > { \l__sc_Lx_dim + \columnwidth + 0.5 \columnsep }
+          { 1 } { 0 }
+      }
+      { 0 }
+  }
+
+% Highlight the part of phrase #1 that lies on the current page: one band per
+% line it occupies, in whichever column the line is. Lines are found from the
+% start, end and word marks; inner lines run the full column width.
+\seq_new:N  \l__sc_lines_seq
+\int_new:N  \l__sc_lc_int
+\int_new:N  \l__sc_c_int
+\int_new:N  \l__sc_nl_int
+\dim_new:N  \l__sc_ly_dim
+\dim_new:N  \l__sc_hxs_dim
+\dim_new:N  \l__sc_hxe_dim
+\dim_new:N  \l__sc_hys_dim
+\bool_new:N \l__sc_sp_bool
+\bool_new:N \l__sc_ep_bool
+\bool_new:N \l__sc_oneline_bool
+\tl_new:N   \l__sc_ctxid_tl
+
+\cs_new_protected:Npn \__sc_hl_phrase:n #1
+  {
+    \tl_set:Ne \l__sc_ctxid_tl { \sc@get {#1} { ctx } }
+    \bool_set:Nn \l__sc_sp_bool
+      {
+        \int_compare_p:nNn
+          { \__sc_ref:nnn { s- #1 } { abspage } { -1 } } = { \l__sc_page_int }
+      }
+    \bool_set:Nn \l__sc_ep_bool
+      {
+        \int_compare_p:nNn
+          { \__sc_ref:nnn { e- #1 } { abspage } { -1 } } = { \l__sc_page_int }
+      }
+    \__sc_pos:nV { e- #1 } \l__sc_ctxid_tl
+    \dim_set_eq:NN \l__sc_hxe_dim \l__sc_px_dim
+    \__sc_pos:nV { s- #1 } \l__sc_ctxid_tl
+    \dim_set_eq:NN \l__sc_hxs_dim \l__sc_px_dim
+    \dim_set_eq:NN \l__sc_hys_dim \l__sc_py_dim
+    \dim_set:Nn \l__sc_ht_dim { \fp_to_dim:n { \l__sc_sy_fp * ( \sc@get {#1} { ht } ) } }
+    \dim_set:Nn \l__sc_dp_dim { \fp_to_dim:n { \l__sc_sy_fp * ( \sc@get {#1} { dp } ) } }
+    % collect the lines (marks come in reading order)
+    \seq_clear:N \l__sc_lines_seq
+    \int_set:Nn \l__sc_lc_int { -1 }
+    \bool_set_true:N \l__sc_oneline_bool
+    \__sc_hl_mark:n { s- #1 }
+    \int_step_inline:nn { 0 \sc@get {#1} { nw } } { \__sc_hl_mark:n { w- #1 - ##1 } }
+    \__sc_hl_mark:n { e- #1 }
+    \int_set:Nn \l__sc_nl_int { \seq_count:N \l__sc_lines_seq }
+    \bool_if:nTF { \l__sc_sp_bool && \l__sc_ep_bool && \l__sc_oneline_bool }
+      {
+        % on one line (also a table cell that crosses the column middle)
+        \__sc_hl:nnnn { \l__sc_hxs_dim } { \l__sc_hys_dim - \l__sc_dp_dim }
+                      { \l__sc_hxe_dim } { \l__sc_hys_dim + \l__sc_ht_dim }
+      }
+      {
+        \seq_map_indexed_inline:Nn \l__sc_lines_seq
+          { \__sc_hl_line:nnnnn {#1} {##1} ##2 }
+        % no word marks (math): fill the lines between first and last line
+        \bool_lazy_all:nT
+          {
+            { \int_compare_p:nNn { 0 \sc@get {#1} { nw } } = { 0 } }
+            { \int_compare_p:nNn { \l__sc_nl_int } = { 2 } }
+          }
+          {
+            \use:e
+              {
+                \exp_not:N \__sc_hl_gap:nnnnnnn
+                \seq_item:Nn \l__sc_lines_seq { 1 }
+                \seq_item:Nn \l__sc_lines_seq { 2 }
+                {#1}
+              }
+          }
+      }
+  }
+
+% mark #1: start a new line unless it lies on the line of the previous mark
+\cs_new_protected:Npn \__sc_hl_mark:n #1
+  {
+    \int_compare:nNnT
+      { \__sc_ref:nnn {#1} { abspage } { -1 } } = { \l__sc_page_int }
+      {
+        \__sc_pos:nV {#1} \l__sc_ctxid_tl
+        \int_set:Nn \l__sc_c_int { \__sc_colidx:n { \l__sc_px_dim } }
+        \bool_if:nF
+          {
+            \int_compare_p:nNn { \l__sc_c_int } = { \l__sc_lc_int }
+            && \dim_compare_p:nNn
+                 { \dim_abs:n { \l__sc_py_dim - \l__sc_ly_dim } } < { 1pt }
+          }
+          {
+            \int_compare:nNnF { \l__sc_lc_int } = { -1 }
+              {
+                \dim_compare:nNnF
+                  { \dim_abs:n { \l__sc_py_dim - \l__sc_ly_dim } } < { 1pt }
+                  { \bool_set_false:N \l__sc_oneline_bool }
+              }
+            \seq_put_right:Ne \l__sc_lines_seq
+              {
+                { \int_use:N \l__sc_c_int }
+                { \dim_use:N \l__sc_px_dim }
+                { \dim_use:N \l__sc_py_dim }
+              }
+            \int_set_eq:NN \l__sc_lc_int \l__sc_c_int
+            \dim_set_eq:NN \l__sc_ly_dim \l__sc_py_dim
+          }
+      }
+  }
+
+% #1 comment, #2 line index, #3 column, #4 x of a point on the line, #5 baseline
+\cs_new_protected:Npn \__sc_hl_line:nnnnn #1#2#3#4#5
+  {
+    \__sc_column:n {#4}
+    \__sc_indent:n {#1}
+    \__sc_hl:nnnn
+      {
+        \bool_if:nTF { \int_compare_p:nNn {#2} = { 1 } && \l__sc_sp_bool }
+          { \l__sc_hxs_dim } { \l__sc_colL_dim }
+      }
+      { #5 - \l__sc_dp_dim }
+      {
+        \bool_if:nTF { \int_compare_p:nNn {#2} = { \l__sc_nl_int } && \l__sc_ep_bool }
+          { \l__sc_hxe_dim } { \l__sc_colR_dim }
+      }
+      { #5 + \l__sc_ht_dim }
+  }
+
+% lines {#1}{#2}{#3} and {#4}{#5}{#6} of comment #7: fill what lies between
+\cs_new_protected:Npn \__sc_hl_gap:nnnnnnn #1#2#3#4#5#6#7
+  {
+    \bool_if:nT
+      {
+        \int_compare_p:nNn {#1} = {#4}
+        && \dim_compare_p:nNn { #6 + \l__sc_ht_dim } < { #3 - \l__sc_dp_dim }
+      }
+      {
+        \__sc_column:n {#2}
+        \__sc_indent:n {#7}
+        \__sc_hl:nnnn { \l__sc_colL_dim } { #6 + \l__sc_ht_dim }
+                      { \l__sc_colR_dim } { #3 - \l__sc_dp_dim }
+      }
+  }
+
 \cs_new_protected:Npn \__sc_prepare_item:n #1
   {
-    \dim_set:Nn \l__sc_xs_dim { \__sc_ref:nnn { s- #1 } { posx } { 0 } sp }
-    \dim_set:Nn \l__sc_ys_dim { \__sc_ref:nnn { s- #1 } { posy } { 0 } sp }
+    \__sc_pos:ne { s- #1 } { \sc@get {#1} { ctx } }
+    \dim_set_eq:NN \l__sc_xs_dim \l__sc_px_dim
+    \dim_set_eq:NN \l__sc_ys_dim \l__sc_py_dim
     \tl_set:Ne \l__sc_kind_tl { \sc@get {#1} { kind } }
     \tl_set:Ne \l__sc_col_tl  { \sc@get {#1} { color } }
     \str_if_eq:VnTF \l__sc_kind_tl { note }
@@ -361,15 +674,16 @@
         \bool_set_true:N \l__sc_endsame_bool
       }
       {
-        \dim_set:Nn \l__sc_xe_dim { \__sc_ref:nnn { e- #1 } { posx } { 0 } sp }
-        \dim_set:Nn \l__sc_ye_dim { \__sc_ref:nnn { e- #1 } { posy } { 0 } sp }
+        \__sc_pos:ne { e- #1 } { \sc@get {#1} { ctx } }
+        \dim_set_eq:NN \l__sc_xe_dim \l__sc_px_dim
+        \dim_set_eq:NN \l__sc_ye_dim \l__sc_py_dim
         \bool_set:Nn \l__sc_endsame_bool
           {
             \int_compare_p:nNn
               { \__sc_ref:nnn { e- #1 } { abspage } { -1 } } = { \l__sc_page_int }
           }
-        \dim_set:Nn \l__sc_ht_dim { \sc@get {#1} { ht } }
-        \dim_set:Nn \l__sc_dp_dim { \sc@get {#1} { dp } }
+        \dim_set:Nn \l__sc_ht_dim { \fp_to_dim:n { \l__sc_sy_fp * ( \sc@get {#1} { ht } ) } }
+        \dim_set:Nn \l__sc_dp_dim { \fp_to_dim:n { \l__sc_sy_fp * ( \sc@get {#1} { dp } ) } }
       }
     % ---- side
     \str_set:Ne \l__sc_s_str { \sc@get {#1} { side } }
@@ -392,36 +706,7 @@
       {
         { phrase }
           {
-            \__sc_column:n { \l__sc_xs_dim }
-            \__sc_indent:n {#1}
-            \bool_if:nTF
-              {
-                \l__sc_endsame_bool
-                && \dim_compare_p:nNn
-                     { \dim_abs:n { \l__sc_ys_dim - \l__sc_ye_dim } } < { 1pt }
-              }
-              {
-                \__sc_hl:nnnn { \l__sc_xs_dim } { \l__sc_ys_dim - \l__sc_dp_dim }
-                              { \l__sc_xe_dim } { \l__sc_ys_dim + \l__sc_ht_dim }
-              }
-              {
-                \__sc_hl:nnnn { \l__sc_xs_dim } { \l__sc_ys_dim - \l__sc_dp_dim }
-                              { \l__sc_colR_dim } { \l__sc_ys_dim + \l__sc_ht_dim }
-                \bool_if:NT \l__sc_endsame_bool
-                  {
-                    \dim_compare:nNnT
-                      { \l__sc_ye_dim + \l__sc_ht_dim } < { \l__sc_ys_dim - \l__sc_dp_dim }
-                      {
-                        \__sc_hl:nnnn
-                          { \l__sc_colL_dim } { \l__sc_ye_dim + \l__sc_ht_dim }
-                          { \l__sc_colR_dim } { \l__sc_ys_dim - \l__sc_dp_dim }
-                      }
-                    \__sc_column:n { \l__sc_xe_dim }
-                    \__sc_indent:n {#1}
-                    \__sc_hl:nnnn { \l__sc_colL_dim } { \l__sc_ye_dim - \l__sc_dp_dim }
-                                  { \l__sc_xe_dim } { \l__sc_ye_dim + \l__sc_ht_dim }
-                  }
-              }
+            \__sc_hl_phrase:n {#1}
             \str_if_eq:VnTF \l__sc_s_str { left }
               {
                 \dim_set:Nn \l__sc_tx_dim { \l__sc_xs_dim - 0.5pt }

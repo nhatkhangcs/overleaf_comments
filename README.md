@@ -13,6 +13,12 @@ submission.
 |---|---|---|---|
 | ![ARR](docs/arr.png) | ![ICLR](docs/iclr.png) | ![CVPR](docs/cvpr.png) | ![AAAI](docs/aaai.png) |
 
+Highlights follow the text wherever it goes: across lines, from one column
+into the next, onto the next page (below any full-width figure there), and
+into tables shrunk with `\resizebox`:
+
+![Highlights across a column break, a page break, and in a resized table](docs/spanning.png)
+
 Tested with the official templates: ACL/ARR `acl.sty` (review mode), ICLR 2027,
 the CVPR author kit (review mode), and AAAI-27. It works with any other class
 too (NeurIPS, ICML, IEEE, plain `article`), on pdfLaTeX, XeLaTeX and LuaLaTeX.
@@ -61,7 +67,7 @@ For each `\screviewer{XY}{Name}{color}`:
 
 | Command | Use it for |
 |---|---|
-| `\XY[opts]{phrase}{comment}` | Highlights the phrase (it may span lines) and points at it |
+| `\XY[opts]{phrase}{comment}` | Highlights the phrase and points at it. The phrase may run over several lines, columns or pages |
 | `\XYnote[opts]{comment}` | Marks the current position with a caret ("insert something here") |
 | `\XYbox[opts]{content}{comment}` | Puts a dashed frame around a figure, table, equation or any box |
 
@@ -79,6 +85,17 @@ Per-comment options (`opts`):
 
 The comment text can hold any LaTeX: math, `\emph`, `\ref`, `\cite`, several
 paragraphs.
+
+Commenting on one number in a table works even when the table is scaled to
+fit the column:
+
+```latex
+\resizebox{\linewidth}{!}{%
+  \begin{tabular}{lccc}
+    ...
+    StreamFraudNet & \KV{0.7313}{Previously was 0.7131.} & 0.8333 & 0.6122 \\
+  \end{tabular}}
+```
 
 ## Package options
 
@@ -101,7 +118,14 @@ These can also be set later in the preamble with `\scsetup{width=6cm}`.
 
 - At `\begin{document}` the paper is widened by `width` on each side and the
   content is moved over with `\hoffset`. Nothing inside the text area moves.
-- Each comment saves the position of its target with `zref-savepos`.
+- Each comment saves the position of its target with `zref-savepos`. A
+  highlighted phrase also gets an invisible mark after every space, so the
+  package knows every line the phrase lands on, in whichever column and on
+  whichever page. Each of those lines is highlighted; the inner ones across
+  the full column width.
+- `\scalebox` and `\resizebox` record where they start and by how much they
+  scale, so positions measured inside them (which TeX reports unscaled) are
+  mapped back to where the content really appears.
 - While each page ships out, the package collects that page's comments, sorts
   them top to bottom, and stacks them per side. Boxes start level with their
   target and get pushed down (or up near the page bottom) so they never
@@ -112,9 +136,12 @@ These can also be set later in the preamble with `\scsetup{width=6cm}`.
 
 `examples/<venue>/main.tex` is a short mock paper with comments on text, a
 figure, a table and an equation, built on the official style files.
+`examples/spanning/main.tex` is a plain two-column paper with a comment on a
+cell of a resized table, a phrase that crosses a column break, and one that
+crosses a page break (the image above).
 
 ```sh
-make            # build all four demos (needs latexmk)
+make            # build all demos (needs latexmk)
 make arr        # just one
 make zips       # dist/<venue>.zip: self-contained, ready for Overleaf "Upload Project"
 make clean
@@ -123,8 +150,13 @@ make clean
 ## Limitations
 
 - The first compile shows no comments; they appear on the second run.
-- A highlight that crosses a page or column break is only highlighted up to
-  the break. The arrow still points at its start.
+- A phrase that contains math (`$`, `\(`) or a `[` gets no word marks, so
+  that no mark ends up inside the math or an optional argument. Within one
+  column all its lines are still highlighted, but if it crosses a column or
+  page break, only its first and last lines are. The box and arrow always
+  stay on the page where the phrase starts.
+- Positions inside `\rotatebox`, `\reflectbox` or `adjustbox` scaling are not
+  corrected; comment next to such a box, or use `\XYbox` around it.
 - If a page has more comments than fit in the margin height, boxes overlap
   and a warning is written to the log. Use `sides=both`, a wider `width`, or
   shorter comments.
@@ -133,6 +165,10 @@ make clean
   show up in running heads, so put it next to the title instead.
 - The AAAI and other camera-ready checkers expect the original page size:
   always submit with `[final]`, or with the package removed.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## Author
 

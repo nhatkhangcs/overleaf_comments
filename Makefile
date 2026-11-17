@@ -1,4 +1,4 @@
-VENUES := arr iclr cvpr aaai
+VENUES := arr iclr cvpr aaai spanning
 
 .PHONY: all clean zips $(VENUES)
 

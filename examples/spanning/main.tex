@@ -1,0 +1,86 @@
+% Demo: comments on targets that are hard to point at.
+%   - one number in a table squeezed with \resizebox
+%   - a phrase that runs from the left column into the right one
+%   - a phrase that runs onto the next page, below a full-width figure
+% Plain two-column article; works the same with acl.sty, aaai2027.sty, ...
+\documentclass[twocolumn,10pt]{article}
+\usepackage[letterpaper,margin=0.75in,columnsep=0.3in]{geometry}
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{lipsum}
+
+\usepackage{sidecomments}
+\screviewer{KV}{Khang}{blue}
+\screviewer{AB}{Reviewer 2}{red!80!black}
+
+\title{Streaming Fraud Detection on Phone Calls}
+\author{Anonymous submission}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Results}
+
+Table~\ref{tab:main} compares the streaming detector with audio language
+models evaluated on full calls.
+
+\begin{table}[t]
+  \centering
+  \caption{Full TeleAntiFraud-28K results. The table is scaled with
+    \texttt{\textbackslash resizebox} to the column width.}
+  \label{tab:main}
+  \resizebox{\linewidth}{!}{%
+    \begin{tabular}{lccccc}
+      \toprule
+      Model & Acc. & Prec. & Rec. & F1 & AUC \\
+      \midrule
+      Qwen2-Audio Base     & 0.6183 & 0.6840 & 0.5112 & 0.5851 & -- \\
+      Qwen2-Audio ASR-text & 0.7127 & 0.7639 & 0.6680 & 0.7127 & -- \\
+      Qwen2-Audio Think    & 0.8422 & 0.8615 & 0.8345 & 0.8478 & -- \\
+      StreamFraudNet & \KV{0.7313}{Previously was 0.7131. A single cell
+        inside a \texttt{\textbackslash resizebox}.}
+        & 0.8333 & 0.6122 & 0.7058 & 0.8100 \\
+      \bottomrule
+    \end{tabular}}
+\end{table}
+
+\lipsum[1-2] \lipsum[3][1-2]
+
+To assess computational efficiency under resource-constrained conditions,
+we sample 500 training instances per dataset and evaluate all models on
+commodity hardware. \AB{These results demonstrate that the model remains
+deployable in resource-constrained environments without GPU acceleration.
+Every configuration keeps a real-time factor well below one, and even the
+largest encoder processes a ten-second window in under half the window's
+duration on a laptop CPU, which leaves enough headroom for the feature
+extraction and the aggregator to run on the same core while the call is
+still in progress and the caller is still on the line.}{This sentence
+starts at the bottom of the left column and ends in the right one; every
+line of it is highlighted.}
+
+\lipsum[4-17]
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.8\textwidth,height=3.2cm]{example-image-a}
+  \caption{A full-width figure at the top of the next page. The highlight
+    continues below it, not over it.}
+\end{figure*}
+
+\lipsum[8]
+
+\KV{The local score spikes only in the very first window, which happens to
+contain a phone-number exchange, a superficial pattern that co-occurs with
+scam openings in the training distribution. As the conversation moves into
+unrelated resolution dialogue, the score decays by two to three orders of
+magnitude within four to six seconds and remains near zero thereafter,
+which confirms that the detector reacts to local lexical and acoustic
+features within its bounded window rather than propagating a persistent
+belief across the whole call.}{This phrase crosses the page break. The box
+stays where the phrase starts; the rest is highlighted on the next page.}
+
+\lipsum[9-12]
+
+\end{document}
