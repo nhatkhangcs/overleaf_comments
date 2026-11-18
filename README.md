@@ -150,11 +150,12 @@ make clean
 ## Limitations
 
 - The first compile shows no comments; they appear on the second run.
-- A phrase that contains math (`$`, `\(`) or a `[` gets no word marks, so
-  that no mark ends up inside the math or an optional argument. Within one
-  column all its lines are still highlighted, but if it crosses a column or
-  page break, only its first and last lines are. The box and arrow always
-  stay on the page where the phrase starts.
+- Math inside a phrase (`$...$`, `\(...\)`) is fine. A phrase with a `[`
+  outside math gets no word marks, so that no mark ends up inside an optional
+  argument such as `[width=3cm, height=2cm]`. Within one column all its lines
+  are still highlighted, but if it crosses a column or page break, only its
+  first and last lines are. The box and arrow always stay on the page where
+  the phrase starts.
 - Positions inside `\rotatebox`, `\reflectbox` or `adjustbox` scaling are not
   corrected; comment next to such a box, or use `\XYbox` around it.
 - If a page has more comments than fit in the margin height, boxes overlap

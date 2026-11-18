@@ -4,6 +4,23 @@ All notable changes to `sidecomments` are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## 1.1.1 - 2026-11-18
+
+### Fixed
+
+- **Phrases containing inline math are highlighted on every line again when
+  they cross a column or page break.** In 1.1 a phrase with `$...$` or
+  `\(...\)` (for example `\(95\%\ \mathrm{CI}=[0.00246,0.01809]\)`) got no
+  position marks, so only its first and last lines were highlighted. Marks
+  that land inside math now simply do nothing, so the rest of the phrase is
+  marked as usual.
+
+### Changed
+
+- Only a `[` **outside** math still turns off the marks for a phrase, since a
+  mark inside an optional argument such as `[width=3cm, height=2cm]` would
+  break it.
+
 ## 1.1 - 2026-11-17
 
 ### Fixed
@@ -45,7 +62,7 @@ All notable changes to `sidecomments` are listed here. The format follows
 - A phrase containing `$`, `\(` or `[` gets no position marks, so that none
   ends up inside math or an optional argument. Within one column all of its
   lines are still highlighted; across a column or page break, only its first
-  and last lines are.
+  and last lines are. (Math no longer counts as of 1.1.1.)
 - Positions inside `\rotatebox`, `\reflectbox` and `adjustbox` scaling are not
   corrected. Use `\XYbox` around such a box, or comment next to it.
 

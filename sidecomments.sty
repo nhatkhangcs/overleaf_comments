@@ -19,7 +19,7 @@
 %% Released under the MIT license.
 
 \NeedsTeXFormat{LaTeX2e}[2022/06/01]
-\ProvidesExplPackage{sidecomments}{2026/11/17}{1.1}
+\ProvidesExplPackage{sidecomments}{2026/11/18}{1.1.1}
   {Visual side-margin review comments with arrows}
 
 % ---------------------------------------------------------------------------
@@ -221,20 +221,20 @@
 \cs_new_protected:Npn \__sc_savepos:n #1 { \zsavepos { sc- #1 } }
 % A phrase gets a position mark after every top-level space, so that every
 % line it occupies is known: it may run over several lines, into the next
-% column or onto the next page. Phrases holding math or optional arguments are
-% left untouched (a mark there could end up inside them).
+% column or onto the next page. A mark that ends up in math mode does nothing.
+% Phrases with a [ outside math are left untouched: a mark inside an optional
+% argument such as [width=3cm, height=2cm] would break it.
 \tl_new:N \l__sc_phrase_tl
 \cs_new_protected:Npn \__sc_phrase:nn #1#2
   {
     \int_gzero_new:c { g__sc_nw_ #1 _int }
     \tl_set:Nn \l__sc_phrase_tl {#2}
-    \tl_if_in:nnF {#2} { $ }
+    \regex_replace_all:nnN { \$ [^\$]* \$ | \c{\(} .*? \c{\)} } { } \l__sc_phrase_tl
+    \tl_if_in:NnTF \l__sc_phrase_tl { [ }
+      { \tl_set:Nn \l__sc_phrase_tl {#2} }
       {
-        \tl_if_in:nnF {#2} { [ }
-          {
-            \tl_if_in:nnF {#2} { \( }
-              { \tl_replace_all:Nnn \l__sc_phrase_tl { ~ } { ~ \__sc_wmark:n {#1} } }
-          }
+        \tl_set:Nn \l__sc_phrase_tl {#2}
+        \tl_replace_all:Nnn \l__sc_phrase_tl { ~ } { ~ \__sc_wmark:n {#1} }
       }
     \__sc_savepos:n { s- #1 }
     \tl_use:N \l__sc_phrase_tl
@@ -243,8 +243,11 @@
   }
 \cs_new_protected:Npn \__sc_wmark:n #1
   {
-    \int_gincr:c { g__sc_nw_ #1 _int }
-    \__sc_savepos:n { w- #1 - \int_use:c { g__sc_nw_ #1 _int } }
+    \mode_if_math:F
+      {
+        \int_gincr:c { g__sc_nw_ #1 _int }
+        \__sc_savepos:n { w- #1 - \int_use:c { g__sc_nw_ #1 _int } }
+      }
   }
 
 % ---------------------------------------------------------------------------
